@@ -36,11 +36,16 @@ jobs:
       - name: Install build dependencies
         run: |
           set -euo pipefail
-          brew install llvm ninja libarchive pkgconf
+          brew install llvm lld ninja libarchive pkgconf
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:$PATH"
           /opt/homebrew/opt/llvm/bin/clang --version | head -2
-          command -v ld.lld || ls -la /opt/homebrew/opt/llvm/bin | head -20
+          if ! command -v ld.lld >/dev/null; then
+            found="$(find /opt/homebrew -name 'ld.lld' -type f 2>/dev/null | head -1)"
+            echo "ld.lld not on PATH, found: ${found:-none}"
+            if [ -n "$found" ]; then sudo ln -sf "$found" /opt/homebrew/bin/ld.lld; fi
+          fi
+          command -v ld.lld
           command -v ninja
           brew --prefix libarchive
           if [ ! -x /usr/bin/jq ]; then
