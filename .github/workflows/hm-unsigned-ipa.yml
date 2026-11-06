@@ -67,6 +67,21 @@ jobs:
           export ISH_LIBARCHIVE_PREFIX="$(brew --prefix libarchive)"
           ./Scripts/build-ish-sandbox.sh all 2>&1 | tee build-ish.log | tail -n 30
 
+      - name: Refresh artifact hashes for the locally rebuilt sandbox
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          path = 'Dependencies/artifacts.lock.json'
+          data = json.load(open(path))
+          for item in data['artifacts']:
+              target = item['path']
+              if os.path.exists(target):
+                  item['sha256'] = hashlib.sha256(open(target, 'rb').read()).hexdigest()
+                  print('updated', target, item['sha256'])
+          json.dump(data, open(path, 'w'), indent=2)
+          PY
+          cat Dependencies/artifacts.lock.json
+
       - name: Build app (unsigned, device)
         run: |
           set -o pipefail
