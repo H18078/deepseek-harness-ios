@@ -52,6 +52,9 @@ jobs:
             echo "relaxing /usr/bin/jq requirement in the build script"
             sed -i '' 's|require_tool /usr/bin/jq|require_tool jq|' Scripts/build-ish-sandbox.sh
           fi
+          # Xcode 26.6 lipo requires <input_file> before -verify_arch.
+          sed -i '' -E 's/"\$lipo" -verify_arch arm64 "(\$[a-z_]+)"/"$lipo" "\1" -verify_arch arm64/g' Scripts/build-ish-sandbox.sh
+          grep -n 'verify_arch' Scripts/build-ish-sandbox.sh | head
 
       - name: Fetch pinned upstream sources
         run: |
