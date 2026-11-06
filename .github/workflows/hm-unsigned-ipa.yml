@@ -1,0 +1,110 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-mobile-ipa
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          ls /Applications | grep -i '^Xcode' || true
+          if [ -d /Applications/Xcode_26.6.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.6.app
+          else
+            latest="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+            echo "Xcode 26.6 not found, using $latest"
+            sudo xcode-select -s "$latest"
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          brew install llvm ninja libarchive pkgconf
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          /opt/homebrew/opt/llvm/bin/clang --version | head -2
+          command -v ld.lld
+          command -v ninja
+          brew --prefix libarchive
+          if [ ! -x /usr/bin/jq ]; then
+            echo "relaxing /usr/bin/jq requirement in the build script"
+            sed -i '' 's|require_tool /usr/bin/jq|require_tool jq|' Scripts/build-ish-sandbox.sh
+          fi
+
+      - name: Fetch pinned upstream sources
+        run: |
+          ./Scripts/fetch-upstreams.sh 2>&1 | tee fetch-upstreams.log | tail -n 30
+
+      - name: Build iSH sandbox xcframework and rootfs
+        run: |
+          set -o pipefail
+          export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:$PATH"
+          export ISH_LIBARCHIVE_PREFIX="$(brew --prefix libarchive)"
+          ./Scripts/build-ish-sandbox.sh all 2>&1 | tee build-ish.log | tail -n 30
+
+      - name: Build app (unsigned, device)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project HarnessMobile.xcodeproj \
+            -scheme HarnessMobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            build 2>&1 | tee app-build.log | tail -n 60
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          PROD="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos"
+          APP="$(find "$PROD" -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "no .app produced"; ls -la "$PROD"; exit 1; }
+          echo "APP=$APP"
+          NAME="$(basename "$APP" .app)"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          cd "$RUNNER_TEMP/ipa"
+          zip -qry "HarnessMobile-unsigned.ipa" Payload
+          ls -lh
+          echo "IPA=$RUNNER_TEMP/ipa/HarnessMobile-unsigned.ipa" >> "$GITHUB_ENV"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            fetch-upstreams.log
+            build-ish.log
+            app-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HarnessMobile-ipa
+          path: ${{ runner.temp }}/ipa/*.ipa
+          retention-days: 7
+          if-no-files-found: error
