@@ -38,8 +38,9 @@ jobs:
           set -euo pipefail
           brew install llvm ninja libarchive pkgconf
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:$PATH"
           /opt/homebrew/opt/llvm/bin/clang --version | head -2
-          command -v ld.lld
+          command -v ld.lld || ls -la /opt/homebrew/opt/llvm/bin | head -20
           command -v ninja
           brew --prefix libarchive
           if [ ! -x /usr/bin/jq ]; then
